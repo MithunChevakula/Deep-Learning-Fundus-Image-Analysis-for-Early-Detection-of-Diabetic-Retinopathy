@@ -58,15 +58,15 @@
                 style="width:200px;height:200px">
             </lord-icon></div>
             <div class="mb-3">
-                <input type="email" class="form-control" id="exampleInputEmail1" name="mail" aria-describedby="emailHelp" placeholder="Enter Registered Mail ID">
+                <input type="email" class="form-control" id="exampleInputEmail1" name="mail" aria-describedby="emailHelp" placeholder="Enter Registered Mail ID" required>
               </div>
               <div class="mb-3">
-                <input type="password" class="form-control" id="exampleInputPassword1" name="pass" placeholder="Enter Password">
+                <input type="password" class="form-control" id="exampleInputPassword1" name="pass" placeholder="Enter Password" required>
               </div>
               <div class="mb-3">
               <button type="submit form-control" class="btn btn-dark btn-primary" style="width:100%;" type="submit">Login</button>
             </div>
-            {{pred}}
+            <p style="color: red; font-weight: bold;">{{pred}}</p>
       </div>
     </form>
   </body>

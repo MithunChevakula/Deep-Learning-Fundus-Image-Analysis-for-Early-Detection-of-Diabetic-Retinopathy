@@ -1,0 +1,25 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Model files (too large for git)
+*.h5
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# User data
+users.json
+User_Images/*
+!User_Images/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

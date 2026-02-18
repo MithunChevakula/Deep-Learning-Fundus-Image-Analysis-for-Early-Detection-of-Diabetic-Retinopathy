@@ -1,25 +1,63 @@
 import numpy as np
 import os
+import json
 import tensorflow as tf
 from tensorflow import keras
-from keras.models import load_model
 from keras.preprocessing import image
 from keras.applications.inception_v3 import preprocess_input
-from flask import Flask, request,flash, render_template, redirect,url_for
-from cloudant.client import Cloudant
-from twilio.rest import Client
-model = load_model(r"Updated-xception-diabetic-retinopathy.h5")
-app = Flask(__name__)
-app.secret_key="abc"
-app.config['UPLOAD_FOLDER'] = "User_Images"
-# Authenticate using an IAM API key
-client = Cloudant.iam('c2122ee4-b4d5-4cd4-a15a-26af8dc9533e-bluemix','1HTTyEGgmFvrcaEzQqHflsuHpqZ3Y4UUsChgqXcIW_Ze',connect=True)
-# Create a database using an initialized client
-my_database = client.create_database('my_database')
-if my_database.exists():
-    print("Database '{0}' successfully created.".format('my_db'))
-# default home page or route
+from flask import Flask, request, flash, render_template, redirect, url_for
 
+# Load model with legacy Keras format for compatibility
+import tf_keras
+model = tf_keras.models.load_model(r"Updated-Xception-diabetic-retinopathy.h5", compile=False)
+app = Flask(__name__)
+app.secret_key = "abc"
+app.config['UPLOAD_FOLDER'] = "User_Images"
+
+# Simple local JSON-based user database
+USERS_FILE = "users.json"
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE, 'r') as f:
+            return json.load(f)
+    return []
+
+def save_users(users):
+    with open(USERS_FILE, 'w') as f:
+        json.dump(users, f, indent=2)
+
+def find_user(mail):
+    if not mail or not mail.strip():  # Don't match empty/None/whitespace emails
+        return None
+    mail = mail.strip()
+    users = load_users()
+    for user in users:
+        if user.get('mail', '').strip() == mail:
+            return user
+    return None
+
+def validate_password(password):
+    """Password must have at least 8 chars, 1 uppercase, 1 lowercase, 1 digit"""
+    if len(password) < 8:
+        return False, "Password must be at least 8 characters long"
+    if not any(c.isupper() for c in password):
+        return False, "Password must contain at least one uppercase letter"
+    if not any(c.islower() for c in password):
+        return False, "Password must contain at least one lowercase letter"
+    if not any(c.isdigit() for c in password):
+        return False, "Password must contain at least one digit"
+    return True, ""
+
+def validate_phone(phone):
+    """Phone must be exactly 10 digits"""
+    if not phone.isdigit():
+        return False, "Phone number must contain only digits"
+    if len(phone) != 10:
+        return False, "Phone number must be exactly 10 digits"
+    return True, ""
+
+# default home page or route
 user = ""
 
 @app.route('/')
@@ -35,48 +73,79 @@ def home():
 @ app.route('/register',methods=["GET","POST"])
 def register():
     if request.method == "POST":
-        name =  request.form.get("name")
-        mail = request.form.get("emailid")
-        mobile = request.form.get("num")
-        pswd = request.form.get("pass")
+        name = request.form.get("name", "").strip()
+        mail = request.form.get("emailid", "").strip()
+        mobile = request.form.get("num", "").strip()
+        pswd = request.form.get("pass", "").strip()
+        
+        print(f"Registration attempt: name={name}, mail={mail}, mobile={mobile}, pswd={pswd}")
+        
+        # Validate required fields FIRST
+        if not name or not mail or not mobile or not pswd:
+            return render_template('register.html', pred="Please fill in all fields")
+        
+        # Validate phone number (10 digits)
+        phone_valid, phone_error = validate_phone(mobile)
+        if not phone_valid:
+            return render_template('register.html', pred=phone_error)
+        
+        # Validate password (uppercase, lowercase, digit, min 8 chars)
+        pwd_valid, pwd_error = validate_password(pswd)
+        if not pwd_valid:
+            return render_template('register.html', pred=pwd_error)
+        
+        # Only check for existing user AFTER all validation passes
+        existing_user = find_user(mail)
+        print(f"Existing user check: {existing_user}")
+        
+        if existing_user is not None:
+            return render_template('register.html', pred="You are already a member, please login using your details")
+        
+        # Create new user
         data = {
             'name': name,
             'mail': mail,
             'mobile': mobile,
             'psw': pswd
         }
-        print(data)
-        query = {'mail': {'$eq': data['mail']}}
-        docs = my_database.get_query_result(query)
-        print(docs)
-        print(len(docs.all()))
-        if (len(docs.all()) == 0):
-            url = my_database.create_document(data)
-            return render_template("register.html", pred=" Registration Successful , please login using your details ")
-        else:
-            return render_template('register.html', pred=" You are already a member , please login using your details ")
+        print(f"Saving new user: {data}")
+        users = load_users()
+        users.append(data)
+        save_users(users)
+        return render_template("register.html", pred="Registration Successful! Please login using your details")
     else:
-        return render_template('register.html')
+        return render_template('register.html', pred="")
 
 
 @ app.route('/login', methods=['GET','POST'])
 def login():
     if request.method == "GET":
-        user = request.args.get('mail')
-        passw = request.args.get('pass')
-        print(user, passw)
-        query = {'mail': {'$eq': user}}
-        docs = my_database.get_query_result(query)
-        print(docs)
-        print(len(docs.all()))
-        if (len(docs.all()) == 0):
+        user = request.args.get('mail', '').strip()
+        passw = request.args.get('pass', '').strip()
+        
+        # If no credentials provided (first visit or empty submission)
+        if not user and not passw:
+            # Check if this is a form submission (has query params) vs first visit
+            if 'mail' in request.args or 'pass' in request.args:
+                return render_template('login.html', pred="Enter your login details.")
             return render_template('login.html', pred="")
+        
+        # Validate required fields - one field missing
+        if not user or not passw:
+            return render_template('login.html', pred="Enter your login details.")
+        
+        print(f"Login attempt: {user}, {passw}")
+        existing_user = find_user(user)
+        print(f"Found user: {existing_user}")
+        
+        if existing_user is None:
+            return render_template('login.html', pred="Wrong credentials. Please check your email and password.")
         else:
-            if ((user == docs[0][0]['mail'] and passw == docs[0][0]['psw'])):
-                flash("Logged in as " + str(user))
-                return render_template('index.html', pred="Logged in as "+str(user), vis ="hidden", vis2="visible")
+            if user == existing_user['mail'] and passw == existing_user['psw']:
+                flash("Login Successful! Welcome " + str(existing_user['name']))
+                return render_template('index.html', pred="Login Successful! Welcome " + str(existing_user['name']), vis ="hidden", vis2="visible")
             else:
-                return render_template('login.html', pred="The password is wrong.")
+                return render_template('login.html', pred="Wrong credentials. Please check your email and password.")
     else:
         return render_template('login.html')
 
